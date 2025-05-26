@@ -90,7 +90,7 @@ class Dream(commands.Cog):
         session.close()
 
     @commands.command(name="obter")
-    @commands.cooldown(rate=1, per=600, type=commands.BucketType.user)  
+    @commands.cooldown(rate=1, per=3600, type=commands.BucketType.user)
     async def obter_jogador(self, ctx):
         session = Session()
         autor_id = str(ctx.author.id)
@@ -160,8 +160,8 @@ class Dream(commands.Cog):
             session.commit()
 
             embed = discord.Embed(
-                title=f"{nome_novo} chegou de graça ao seu elenco!",
-                description=f"**Valor de Mercado:** {preco_novo:,.0f} reais\n**Habilidade:** {habilidade_novo}\n**Posição:** {posicao_novo}\n**Coleção:** {colecao}",
+                title=f"O {posicao_novo} {nome_novo} chegou de graça ao seu elenco!",
+                description=f"**Valor de Mercado:** ``{preco_novo:,.0f} reais``\n**Habilidade:** ``{habilidade_novo}``\n**Coleção:** ``{colecao}``",
                 color=discord.Color.blue()
             )
             embed.set_image(url=imagem)
@@ -176,7 +176,7 @@ class Dream(commands.Cog):
     async def on_command_error(self, ctx, error):
         if isinstance(error, commands.CommandOnCooldown):
             minutes = math.ceil(error.retry_after / 60)
-            await ctx.send(f"⏳ Calma! Há um cooldown de 10 minutos para obter jogadores.. Tente novamente em {minutes} minuto{'s' if minutes > 1 else ''}.")
+            await ctx.send(f"Calma! Há um cooldown de 1 hora para obter jogadores.. Tente novamente em {minutes} minuto{'s' if minutes > 1 else ''}.")
         else:
             raise error
 # --- Views de Interação ---
@@ -193,7 +193,7 @@ class OpcoesJogadorView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction):
         return interaction.user.id == self.dono_id
 
-    @discord.ui.button(label="💸 Vender", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="Vender", style=discord.ButtonStyle.success)
     async def vender(self, interaction: discord.Interaction, button: discord.ui.Button):
         session = Session()
         usuario = session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first()
@@ -212,7 +212,7 @@ class OpcoesJogadorView(discord.ui.View):
             session.delete(jogador_para_vender)
             session.commit()
             await interaction.response.send_message(
-                f"✅ Você vendeu **{self.nome}** por R$ {jogador_para_vender.preco:,.0f}!\nSaldo atual: R$ {usuario.saldo:,.0f}",
+                f"✅ Você vendeu **{self.nome}** por ``R$ {jogador_para_vender.preco:,.0f}``!\nSaldo atual: ``R$ {usuario.saldo:,.0f}``",
                 ephemeral=True
             )
         else:
@@ -220,7 +220,7 @@ class OpcoesJogadorView(discord.ui.View):
 
         session.close()
 
-    @discord.ui.button(label="📌 Promover a titular", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Promover a titular", style=discord.ButtonStyle.primary)
     async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
         session = Session()
         usuario = session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first()
