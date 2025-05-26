@@ -1,0 +1,10 @@
+discord.py
+python-dotenv
+deep-translator
+requests
+aiohttp
+Pillow
+SQLAlchemy
+discord-webhook
+Flask
+keep_alive
