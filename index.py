@@ -64,5 +64,29 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
+@bot.command()
+async def enviar(ctx, canal: discord.TextChannel = None):
+    if not canal:
+        await ctx.send("❌ Você precisa mencionar o canal de destino. Exemplo: `m!enviar #geral`")
+        return
+
+    if not ctx.message.reference:
+        await ctx.send("❌ Você precisa responder a uma mensagem para encaminhá-la.")
+        return
+
+    try:
+        original = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+    except:
+        await ctx.send("❌ Não consegui encontrar a mensagem original.")
+        return
+
+    content = f"📨 **Mensagem encaminhada por {ctx.author.mention}:**\n"
+    content += f"> {original.content}" if original.content else "> *(sem texto)*"
+
+    files = [await attachment.to_file() for attachment in original.attachments]
+
+    await canal.send(content, files=files)
+    await ctx.send(f"✅ Mensagem encaminhada com sucesso para {canal.mention}!")
+
 keep_alive()
 bot.run(DISCORD_BOT_TOKEN)
