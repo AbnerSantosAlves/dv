@@ -13,6 +13,8 @@ import os
 import re
 import asyncio # Adicionado para uso futuro em downloads assíncronos
 from discord.ui import Modal, TextInput
+from rapidfuzz import process
+
 
 
 # Configuração do banco de dados
@@ -54,7 +56,7 @@ class MudarNomeTimeModal(Modal):
     def __init__(self):
         super().__init__(title="Mudança no Time")
 
-        self.nome = TextInput(label="Nome", placeholder="Digite o novo nome do seu time")
+        self.nome = TextInput(label="Nome", placeholder="Digite o novo nome do seu time", max_length=15)
         self.add_item(self.nome)
 
 
@@ -86,7 +88,7 @@ class MudarSiglaTimeModal(Modal):
     def __init__(self):
         super().__init__(title="Mudança no Time")
 
-        self.sigla = TextInput(label="Sigla", placeholder="Digite a nova sigla do seu time")
+        self.sigla = TextInput(label="Sigla", placeholder="Digite a nova sigla do seu time", max_length=3)
         self.add_item(self.sigla)
 
 
@@ -323,19 +325,25 @@ class Dream(commands.Cog):
         with Session() as session:
             usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
 
-            nome_busca = jogador.strip()
-            jogador_removido = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_busca).first()
 
+            nome_busca = jogador.strip().upper()
+            jogadores = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
+            lista_nomes = [j.nome for j in jogadores]
 
-            if not jogador_removido:
-                await ctx.send("Não existe nenhum jogador com este nome!")
-                return
-            
-            jogador_removido.posicao_campo = 0
-            jogador_removido.titular = None
-            session.add(jogador_removido)
-            session.commit()
-            await ctx.send(f"O jogador {jogador} acaba de ser removido dos titulares")
+            # Busca os 3 nomes mais parecidos com o nome digitado
+            matches = process.extract(nome_busca, lista_nomes, limit=3, score_cutoff=70)
+
+            if len(matches) == 1:
+                nome_encontrado = matches[0][0]
+                jogador = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_encontrado).first()
+                print(f":white_check_mark: Jogador encontrado: {jogador.nome}")
+                            
+                jogador.posicao_campo = 0
+                jogador.titular = None
+                session.add(jogador)
+                session.commit()
+
+                await ctx.send(f"O jogador {jogador.nome} acaba de ser removido dos titulares")
 
     @commands.command()
     async def promover(self, ctx, *, jogador:str):
@@ -349,18 +357,36 @@ class Dream(commands.Cog):
             
 
             nome_busca = jogador.strip().upper()
-            jogador = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_busca).first()
+            jogadores = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
+            lista_nomes = [j.nome for j in jogadores]
 
-            if not jogador:
-                await ctx.send("Espera! Você não tem esse jogador.")
-                return
+            # Busca os 3 nomes mais parecidos com o nome digitado
+            matches = process.extract(nome_busca, lista_nomes, limit=3, score_cutoff=70)
 
-            nome = jogador.nome
-            valor = jogador.valor
-            habilidade = jogador.habilidade
-            posicao = jogador.posicao
+            if len(matches) == 1:
+                nome_encontrado = matches[0][0]
+                jogador = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_encontrado).first()
+                print(f":white_check_mark: Jogador encontrado: {jogador.nome}")
+                            
+                nome = jogador.nome
+                valor = jogador.valor
+                habilidade = jogador.habilidade
+                posicao = jogador.posicao
 
-            await ctx.send(view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+                await ctx.send(view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+
+            elif len(matches) > 1:
+                nomes_encontrados = [m[0] for m in matches]
+                nomes_formatados = "\n".join(f"• {nome}" for nome in nomes_encontrados)
+                jogador = None
+                resposta = f":rolling_eyes: Vários jogadores encontrados parecidos com '{nome_busca}':\n{nomes_formatados}\nPor favor, especifique melhor o nome, ou pontuação."
+                await ctx.send(resposta)
+
+            else:
+                jogador = None
+                resposta = f"Vish mano, nenhum jogador semelhante a '{nome_busca}' foi encontrado no seu elenco."
+                await ctx.send(resposta)
+
 
 
 
