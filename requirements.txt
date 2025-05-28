@@ -8,3 +8,4 @@ SQLAlchemy
 discord-webhook
 Flask
 keep_alive
+rapidfuzz
