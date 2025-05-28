@@ -155,6 +155,11 @@ class Promover(discord.ui.View):
         # Crie uma nova sessão para esta interação
         with Session() as session:
             usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+
+            if interaction.user.id != self.usuario_discord_id:
+                await interaction.followup.send("Não foi você que pegou essa carta!", ephemeral=True)
+                return
+        
             if not usuario:
                 await interaction.followup.send("Erro: Usuário não encontrado.", ephemeral=True)
                 return
@@ -502,13 +507,18 @@ class ObterOpcoes(discord.ui.View):
         self.usuario_discord_id = usuario_discord_id # Passamos apenas o ID do usuário
         self.ctx = ctx
 
+
     @discord.ui.button(label="Promover", style=discord.ButtonStyle.primary)
     async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True) # Deferir imediatamente
-
         # Crie uma nova sessão para esta interação
         with Session() as session:
             usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+
+            if interaction.user.id != self.usuario_discord_id:
+                await interaction.followup.send("Não foi você que pegou essa carta!", ephemeral=True)
+                return
+            
             if not usuario:
                 await interaction.followup.send("Erro: Usuário não encontrado.", ephemeral=True)
                 return
@@ -531,6 +541,11 @@ class ObterOpcoes(discord.ui.View):
         # Crie uma nova sessão para esta interação
         with Session() as session:
             usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+
+            if interaction.user.id != self.usuario_discord_id:
+                await interaction.followup.send("Não foi você que pegou essa carta!", ephemeral=True)
+                return
+            
             if not usuario:
                 await interaction.response.send_message("Erro: Usuário não encontrado.", ephemeral=True)
                 return
