@@ -3,446 +3,679 @@ from discord.ext import commands
 from discord.ext.commands import BucketType, cooldown
 import random
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from .database import Base, Usuario, JogadorUsuario # Certifique-se de que database está no mesmo nível ou acessível
+from sqlalchemy import create_engine, func
+from .database import Base, Usuario, Jogador
 from data.jogadores import jogadores_futebol
-import math 
+import requests
+from io import BytesIO
+from PIL import Image
+import os
+import re
+import asyncio # Adicionado para uso futuro em downloads assíncronos
+from discord.ui import Modal, TextInput
 
-engine = create_engine('sqlite:///dream.db')
+
+# Configuração do banco de dados
+engine = create_engine('sqlite:///database.db')
 Base.metadata.create_all(engine)
 Session = sessionmaker(bind=engine)
 
-LIMITE_JOGADORES_ELENCO = 11 # Constante para o limite de jogadores no elenco
+# Constantes
+TAMANHO_CARTA = (140, 180)
+posicoes_campo_coordenadas = {
+    10001: (330, 610),  # GL - Goleiro  #lado #cima FEITO
+    10002: (655, 520),  # LD - Lateral Direito  - LD   FEITO
+    10003: (170, 590),  # ZAG1 - Zagueiro Central 1 FEITO
+    10004: (490, 590),  # ZAG2 - Zagueiro Central 2 FEITO
+    10005: (10, 520),  # LE - Lateral Esquerdo  FEITO
+    10006: (335, 400),  # VOL - Volante  #FEITO
+    10007: (170, 270),  # MC - Meio-campo Central #FEITO
+    10008: (500, 200),  # MO - Meia Ofensivo
+    10009: (640, 90),  # PD - Ponta Direita FEITO
+    10010: (330, 40),  # CA - Centroavante FEITO
+    10011: (20, 90),  # PE - Ponta Esquerda #FEITO
+}
+
+LIMITE_JOGADORES_ELENCO = 11  # Constante para o limite de jogadores no elenco
+
+# Cache simples para imagens de cartas baixadas
+# Em um projeto maior, considere um sistema de cache mais robusto (ex: LRU Cache)
+image_cache = {}
+
+def sanitize_filename(filename):
+    """
+    Remove caracteres inválidos para nomes de arquivo (especialmente no Windows,
+    mas bom para compatibilidade cruzada).
+    """
+    invalid_chars = r'[\\/:*?"<>|]'
+    return re.sub(invalid_chars, '', filename)
+
+class MudarNomeTimeModal(Modal):
+    def __init__(self):
+        super().__init__(title="Mudança no Time")
+
+        self.nome = TextInput(label="Nome", placeholder="Digite o novo nome do seu time")
+        self.add_item(self.nome)
+
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True) # Deferir para evitar "Interaction failed"
+
+        with Session() as session:
+            try:
+                # Use interaction.user.id para obter o ID do usuário que interagiu
+                usuario = session.query(Usuario).filter_by(discordId=str(interaction.user.id)).first()
+
+                if not usuario:
+                    # Se o usuário não existe, você pode criar um novo ou enviar um erro
+                    usuario = Usuario(discordId=str(interaction.user.id), nome_time=self.nome.value)
+                    session.add(usuario)
+                    await interaction.followup.send("Novo usuário criado e nome do time atualizado com sucesso!", ephemeral=True)
+                else:
+                    usuario.nome_time = self.nome.value
+                    session.add(usuario)
+                    await interaction.followup.send("Nome do time atualizado com sucesso!", ephemeral=True)
+                session.commit()
+            except Exception as e:
+                session.rollback() # Reverter a transação em caso de erro
+                print(f"Erro ao atualizar nome do time no modal: {e}")
+                await interaction.followup.send("Ocorreu um erro ao atualizar o nome do seu time. Tente novamente mais tarde.", ephemeral=True)
+
+
+class MudarSiglaTimeModal(Modal):
+    def __init__(self):
+        super().__init__(title="Mudança no Time")
+
+        self.sigla = TextInput(label="Sigla", placeholder="Digite a nova sigla do seu time")
+        self.add_item(self.sigla)
+
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True) # Deferir para evitar "Interaction failed"
+
+        with Session() as session:
+            try:
+                # Use interaction.user.id para obter o ID do usuário que interagiu
+                usuario = session.query(Usuario).filter_by(discordId=str(interaction.user.id)).first()
+
+                if not usuario:
+                    # Se o usuário não existe, você pode criar um novo ou enviar um erro
+                    usuario = Usuario(discordId=str(interaction.user.id), nome_time=self.sigla.value)
+                    session.add(usuario)
+                    await interaction.followup.send("Novo usuário criado e nome do time atualizado com sucesso!", ephemeral=True)
+                else:
+                    usuario.time_sigla = self.sigla.value
+                    session.add(usuario)
+                    await interaction.followup.send("Nome do time atualizado com sucesso!", ephemeral=True)
+                session.commit()
+            except Exception as e:
+                session.rollback() # Reverter a transação em caso de erro
+                print(f"Erro ao atualizar nome do time no modal: {e}")
+                await interaction.followup.send("Ocorreu um erro ao atualizar o nome do seu time. Tente novamente mais tarde.", ephemeral=True)
+
+
+class MudarTimeButtons(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # View persistente
+
+    @discord.ui.button(label="Mudar nome do time", style=discord.ButtonStyle.primary)
+    async def botao_nome_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.send_modal(MudarNomeTimeModal())
+        except Exception as e:
+            await interaction.response.send_message("Você já respondeu ou houve um erro.", ephemeral=True)
+            print(f"Erro ao abrir modal: {e}")
+
+    @discord.ui.button(label="Mudar sigla do Time", style=discord.ButtonStyle.primary)
+    async def botao_sigla_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.send_modal(MudarSiglaTimeModal())
+        except Exception as e:
+            await interaction.response.send_message("Você já respondeu ou houve um erro.", ephemeral=True)
+            print(f"Erro ao abrir modal: {e}")
+
+
+class Promover(discord.ui.View):
+    def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, ctx):
+        super().__init__(timeout=None)  # View persistente
+        
+        self.nome = nome
+        self.valor = valor
+        self.habilidade = habilidade
+        self.posicao = posicao
+        self.usuario_discord_id = usuario_discord_id
+        self.ctx = ctx
+
+    @discord.ui.button(label="Promover", style=discord.ButtonStyle.primary)
+    async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True) # Deferir imediatamente
+
+        # Crie uma nova sessão para esta interação
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+            if not usuario:
+                await interaction.followup.send("Erro: Usuário não encontrado.", ephemeral=True)
+                return
+
+            select = PosicaoSelect(
+                nome=self.nome,
+                valor=self.valor,
+                habilidade=self.habilidade,
+                posicao=self.posicao,
+                usuario_discord_id=self.usuario_discord_id, # Passa o ID do usuário para o Select
+                ctx=self.ctx
+            )
+            view = discord.ui.View()
+            view.add_item(select)
+            
+            await interaction.followup.send("Escolha a posição para o jogador:", view=view, ephemeral=True)
+
+async def get_player_card_image(url):
+    """
+    Baixa e armazena em cache a imagem da carta de um jogador.
+    """
+    if url in image_cache:
+        return image_cache[url].copy() # Retorna uma cópia para não modificar a imagem em cache
+
+    try:
+        # Usando aiohttp para download assíncrono (melhor performance para muitas requisições)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                image_data = await response.read()
+        
+        carta = Image.open(BytesIO(image_data)).convert("RGBA")
+        image_cache[url] = carta # Armazena em cache
+        return carta.copy()
+    except requests.exceptions.RequestException as e:
+        print(f"Erro ao baixar a imagem da carta ({url}): {e}")
+        return None
+    except IOError as e:
+        print(f"Erro ao abrir a imagem da carta com Pillow ({url}): {e}")
+        return None
+    except Exception as e:
+        print(f"Erro inesperado ao processar carta ({url}): {e}")
+        return None
+
+
+
 
 class Dream(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="cofre")
-    async def ver_saldo(self, ctx):
-        session = Session()
-        usuario = session.query(Usuario).filter_by(discord_id=str(ctx.author.id)).first()
+    @commands.command()
+    async def cofre(self, ctx):
+        with Session() as session: # Garante que a sessão é fechada
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
 
-        if not usuario:
-            usuario = Usuario(discord_id=str(ctx.author.id), saldo=0.0)
-            session.add(usuario)
-            session.commit()
-
-        embed = discord.Embed(
-            title="Cofre do clube",
-            description=
-            f"O saldo atual é: **``{usuario.saldo:,.0f}``**\n"
-            "Você pode usar esse saldo para contratar novos jogadores e fortalecer o seu elenco! Use m!contratar"
-            )
-        await ctx.send(embed=embed)
-        session.close()
-
-    @commands.command(name="titulares")
-    async def ver_titulares(self, ctx):
-        session = Session()
-        usuario = session.query(Usuario).filter_by(discord_id=str(ctx.author.id)).first()
-
-        if not usuario:
-            await ctx.send("⚠️ Você ainda não possui nenhum jogador.")
-            session.close()
-            return
-
-        jogadores = session.query(JogadorUsuario).filter_by(usuario_id=usuario.id).filter(JogadorUsuario.titular != None).all()
-
-        if not jogadores:
-            await ctx.send("🛑 Nenhum jogador foi escalado como titular.")
-            session.close()
-            return
-
-        embed = discord.Embed(title="📋 Escalação Atual", color=discord.Color.green())
-        for j in jogadores:
-            embed.add_field(name=f"{j.titular} - {j.nome}", value=f"Habilidade: {j.habilidade}", inline=False)
-
-        await ctx.send(embed=embed)
-        session.close()
-
-    @commands.command(name="loja")
-    async def ver_loja(self, ctx):
-        embed = discord.Embed(
-            title="🛒 Loja",
-            description="(em breve) Você poderá comprar melhorias para seu time, visuais, boosts e mais!",
-            color=discord.Color.purple()
-        )
-        embed.set_footer(text="Use m!saldo para ver seu dinheiro.")
-        await ctx.send(embed=embed)
-
-    @commands.command(name="elenco") # Novo comando para ver todos os jogadores
-    async def ver_elenco(self, ctx):
-        session = Session()
-        usuario = session.query(Usuario).filter_by(discord_id=str(ctx.author.id)).first()
-
-        if not usuario or not usuario.jogadores:
-            await ctx.send("⚠️ Você ainda não possui nenhum jogador no seu elenco.")
-            session.close()
-            return
-
-        embed = discord.Embed(title="⚽ Seu Elenco", color=discord.Color.blue())
-        for i, j in enumerate(usuario.jogadores):
-            status = f"(Titular: {j.titular})" if j.titular else "(Reserva)"
-            embed.add_field(name=f"#{i+1} - {j.nome}", value=f"Posição: {j.posicao} | Habilidade: {j.habilidade} {status}", inline=False)
-
-        await ctx.send(embed=embed)
-        session.close()
-
-    @commands.command(name="obter")
-    @commands.cooldown(rate=1, per=3600, type=commands.BucketType.user)
-    async def obter_jogador(self, ctx):
-        session = Session()
-        autor_id = str(ctx.author.id)
-
-        usuario = session.query(Usuario).filter_by(discord_id=autor_id).first()
-        if not usuario:
-            usuario = Usuario(discord_id=autor_id)
-            session.add(usuario)
-            session.commit()
-
-        # Obter os nomes dos jogadores que o usuário já possui
-        jogadores_do_usuario_db = session.query(JogadorUsuario).filter_by(usuario_id=usuario.id).all()
-        nomes_jogadores_usuario = [jogador.nome for jogador in jogadores_do_usuario_db]
-
-        # Filtrar jogadores que o usuário ainda não possui
-        jogadores_disponiveis = {
-            nome: dados for nome, dados in jogadores_futebol.items()
-            if nome not in nomes_jogadores_usuario
-        }
-
-        if not jogadores_disponiveis:
-            await ctx.send("Carambolas, você tem todos os jogadore.")
-            session.close()
-            return
-
-        nome_novo, dados_novo = random.choice(list(jogadores_disponiveis.items()))
-        preco_novo = dados_novo['preco']
-        habilidade_novo = dados_novo['habilidade']
-        posicao_novo = dados_novo['posicao']
-        imagem = dados_novo['imagem']
-        colecao = dados_novo['colecao']
-
-        # --- Lógica de limite de elenco ---
-        contagem_jogadores_elenco = len(jogadores_do_usuario_db) # Usa a lista já obtida
-
-        if contagem_jogadores_elenco >= LIMITE_JOGADORES_ELENCO:
-            # Caso o elenco esteja cheio, permite a substituição
+            if not usuario:
+                usuario = Usuario(discordId=str(ctx.author.id), saldo=0.0, nome_time="Novo Time", time_sigla="NVT", escalacao="4-3-3", valor_time=0.0, estadio="Estádio António Coimbra da Mota")
+                session.add(usuario)
+                session.commit()
+            
             embed = discord.Embed(
-                title=f"🚨 Elenco Cheio! Você obteve {nome_novo}!",
-                description=(
-                    f"Seu time já atingiu o limite de {LIMITE_JOGADORES_ELENCO} jogadores.\n"
-                    f"Você precisa **substituir** um jogador existente por **{nome_novo}** (Habilidade: {habilidade_novo}, Posição: {posicao_novo})."
-                ),
-                color=discord.Color.red()
-            )
-            embed.set_footer(text="Selecione o jogador que será substituído no seu elenco.")
+                title="Cofre do clube",
+                description=
+                f"O saldo atual é: **``{usuario.saldo:,.0f}``**\n"
+                "Você pode usar esse saldo para contratar novos jogadores e fortalecer o seu elenco! Use m!contratar"
+                )
+            await ctx.send(embed=embed)
 
-            # Cria a view para seleção do jogador a ser substituído
-            view = SubstituirJogadorElencoView(
-                usuario_id=ctx.author.id,
-                novo_jogador_data={'nome': nome_novo, 'posicao': posicao_novo, 'habilidade': habilidade_novo, 'preco': preco_novo},
-                jogadores_existentes=jogadores_do_usuario_db # Passa os objetos JogadorUsuario para a view
-            )
-            await ctx.send(embed=embed, view=view)
+    @commands.command()
+    async def time(self, ctx):
+        with Session() as session: # Garante que a sessão é fechada
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
 
-        else:
-            # Caso o elenco não esteja cheio, adiciona o jogador normalmente
-            novo_jogador = JogadorUsuario(
-                nome=nome_novo,
-                posicao=posicao_novo,
-                habilidade=habilidade_novo,
-                preco=preco_novo,
-                titular=None,
-                usuario_id=usuario.id
+            if not usuario:
+                usuario = Usuario(discordId=str(ctx.author.id), saldo=0.0, nome_time="Novo Time", time_sigla="NVT", escalacao="4-3-3", valor_time=0.0, estadio="Estádio António Coimbra da Mota")
+                session.add(usuario)
+                session.commit()
+
+            try:
+                campo = Image.open("./data/campo.jpeg").convert("RGBA")
+            except FileNotFoundError:
+                await ctx.send("Erro: Imagem do campo base não encontrada.", ephemeral=True)
+                return
+
+            jogadores_no_campo = session.query(Jogador).filter(
+                Jogador.usuario_id == usuario.id,
+                Jogador.posicao_campo.isnot(None)
+            ).all()
+
+            jogadores_possuidos = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
+            total_valor_numerico = sum(jogador.valor for jogador in jogadores_possuidos)
+            total_jogadores = len(jogadores_possuidos) # Mais eficiente que contar com func.count() se já carregou todos
+
+            total_valor_formatado = ""
+            if total_valor_numerico >= 1_000_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.0f}M"
+            elif total_valor_numerico >= 1_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000:.0f}K"
+            else:
+                total_valor_formatado = str(total_valor_numerico)
+
+            # Preparar tarefas de download assíncronas para as imagens
+            download_tasks = []
+            jogadores_com_coordenadas = []
+
+            for jogador_atual in jogadores_no_campo:
+                posicao_id_num = jogador_atual.posicao_campo
+                coordenadas = posicoes_campo_coordenadas.get(posicao_id_num)
+
+                if not coordenadas:
+                    print(f"Aviso: Coordenadas não encontradas para o ID de posição: {posicao_id_num} do jogador {jogador_atual.nome}. Pulando este jogador.")
+                    continue
+
+                dados_jogador = jogadores_futebol.get(jogador_atual.nome)
+                url_carta = dados_jogador.get("imagem") if dados_jogador else None
+
+                if not url_carta:
+                    print(f"Aviso: URL da carta não encontrada para o jogador {jogador_atual.nome}. Pulando este jogador.")
+                    continue
+                
+                download_tasks.append(get_player_card_image(url_carta))
+                jogadores_com_coordenadas.append((jogador_atual, coordenadas))
+
+            # Executar todos os downloads em paralelo
+            if download_tasks:
+                cartas_baixadas = await asyncio.gather(*download_tasks)
+
+                for i, (jogador_atual, coordenadas) in enumerate(jogadores_com_coordenadas):
+                    carta = cartas_baixadas[i]
+                    if carta:
+                        carta_redimensionada = carta.resize(TAMANHO_CARTA, Image.LANCZOS)
+                        campo.paste(carta_redimensionada, coordenadas, carta_redimensionada)
+            
+            # Salva a imagem composta temporariamente
+            nome_arquivo_temp = f"time_do_{usuario.id}.png"
+            caminho_temp = os.path.join("./data", nome_arquivo_temp)
+
+            try:
+                campo.save(caminho_temp)
+            except Exception as e:
+                await ctx.send(f"Erro ao salvar a imagem final do campo: {e}", ephemeral=True)
+                return
+
+            # Envia embed com a imagem
+            file = discord.File(caminho_temp, filename=nome_arquivo_temp)
+            embed = discord.Embed(
+                title=f"**[{usuario.time_sigla}] {usuario.nome_time}**\n",
+                description=
+                f"<:money_mxp:1376577220558196868>Valor: **{total_valor_formatado}**\n"
+                f"🏟️Estadio: **{usuario.estadio}**"
             )
+            embed.add_field(name="Formação:", value="```4-3-3```", inline=False)
+            embed.set_thumbnail(url=ctx.author.avatar.url)
+            embed.set_author(name="Vados", icon_url=ctx.bot.user.avatar)
+            embed.set_footer(text="MXP developments")
+            embed.set_image(url=f"attachment://{nome_arquivo_temp}")
+
+            await ctx.send(embed=embed, file=file, view=MudarTimeButtons())
+
+            try:
+                os.remove(caminho_temp) # Limpa o arquivo temporário
+            except OSError as e:
+                print(f"Erro ao remover arquivo temporário {caminho_temp}: {e}")
+
+    @commands.command()
+    async def remover(self, ctx, *, jogador:str):
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
+
+            nome_busca = jogador.strip()
+            jogador_removido = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_busca).first()
+
+
+            if not jogador_removido:
+                await ctx.send("Não existe nenhum jogador com este nome!")
+                return
+            
+            jogador_removido.posicao_campo = 0
+            jogador_removido.titular = None
+            session.add(jogador_removido)
+            session.commit()
+            await ctx.send(f"O jogador {jogador} acaba de ser removido dos titulares")
+
+    @commands.command()
+    async def promover(self, ctx, *, jogador:str):
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
+
+            if not usuario:
+                usuario = Usuario(discordId=str(ctx.author.id), saldo=0.0, nome_time="Novo Time", time_sigla="NVT", escalacao="4-3-3", valor_time=0.0, estadio="Estádio António Coimbra da Mota")
+                session.add(usuario)
+                session.commit()
+            
+
+            nome_busca = jogador.strip().upper()
+            jogador = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_busca).first()
+
+            if not jogador:
+                await ctx.send("Espera! Você não tem esse jogador.")
+                return
+
+            nome = jogador.nome
+            valor = jogador.valor
+            habilidade = jogador.habilidade
+            posicao = jogador.posicao
+
+            await ctx.send(view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+
+
+
+    @commands.command()
+    async def obter(self, ctx):
+        with Session() as session: # Garante que a sessão é fechada
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
+
+            if not usuario:
+                usuario = Usuario(discordId=str(ctx.author.id), saldo=0.0, nome_time="Novo Time", time_sigla="NVT", escalacao="4-3-3", valor_time=0.0, estadio="Estádio António Coimbra da Mota")
+                session.add(usuario)
+                session.commit()
+            
+            # Obter os nomes dos jogadores que o usuário já possui
+            # Carrega todos os jogadores do usuário de uma vez
+            jogadores_possuidos_db = session.query(Jogador.nome).filter_by(usuario_id=usuario.id).all()
+            nomes_jogadores_usuario = {j.nome for j in jogadores_possuidos_db} # Usar set para busca mais rápida
+
+            # Filtrar jogadores que o usuário ainda não possui
+            jogadores_disponiveis = {
+                nome: dados for nome, dados in jogadores_futebol.items()
+                if nome not in nomes_jogadores_usuario
+            }
+            
+            if not jogadores_disponiveis:
+                await ctx.send("Carambolas, você tem todos os jogadores.")
+                return
+
+            nome, dados_novo = random.choice(list(jogadores_disponiveis.items()))
+            valor = dados_novo['preco']
+            habilidade = dados_novo['habilidade']
+            posicao = dados_novo['posicao']
+            imagem = dados_novo['imagem']
+            colecao = dados_novo['colecao']
+
+            if colecao == "Comum":
+                emoji = "<:comummxp:1376541822867865600>"
+            if colecao == "Lendas":
+                emoji = "<:lendasmxp:1376541245635301477>"
+            if colecao == "Base":
+                emoji = "<:comummxp:1376541822867865600>"
+
+
+            novo_jogador = Jogador(nome=nome, valor=valor, habilidade=habilidade, posicao=posicao, usuario_id=usuario.id, posicao_campo=0.0)
             session.add(novo_jogador)
             session.commit()
 
             embed = discord.Embed(
-                title=f"O {posicao_novo} {nome_novo} chegou de graça ao seu elenco!",
-                description=f"**Valor de Mercado:** ``{preco_novo:,.0f} reais``\n**Habilidade:** ``{habilidade_novo}``\n**Coleção:** ``{colecao}``",
+                title=f"O {posicao} {emoji} {nome} chegou de graça ao seu elenco!",
+                description=f"**Valor de Mercado:** ``{valor:,.0f} reais``\n**Habilidade:** ``{habilidade}``\n**Coleção:** ``{dados_novo.get('colecao', 'N/A')}``", # Adicionei .get para colecao caso não exista
                 color=discord.Color.blue()
             )
             embed.set_image(url=imagem)
-
-            view = OpcoesJogadorView(nome_novo, posicao_novo, preco_novo, habilidade_novo, ctx.author.id)
+            # Passa apenas o ID do usuário para evitar problemas de sessão
+            view = ObterOpcoes(nome, valor, habilidade, posicao, usuario.discordId, ctx)
             await ctx.send(embed=embed, view=view)
+    
+    @commands.command()
+    async def elenco(self, ctx):
+        with Session() as session: # Garante que a sessão é fechada
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
 
-        session.close()
+            if not usuario:
+                await ctx.send("Parece que você ainda não tem jogadores. Use `m!obter` para conseguir um!")
+                return # Sai cedo se o usuário não existe
 
-
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        if isinstance(error, commands.CommandOnCooldown):
-            minutes = math.ceil(error.retry_after / 60)
-            await ctx.send(f"Calma! Há um cooldown de 1 hora para obter jogadores.. Tente novamente em {minutes} minuto{'s' if minutes > 1 else ''}.")
-        else:
-            raise error
-# --- Views de Interação ---
-
-class OpcoesJogadorView(discord.ui.View):
-    def __init__(self, nome, posicao, preco, habilidade, dono_id):
-        super().__init__(timeout=60)
-        self.nome = nome
-        self.posicao = posicao
-        self.preco = preco
-        self.habilidade = habilidade
-        self.dono_id = dono_id
-
-    async def interaction_check(self, interaction: discord.Interaction):
-        return interaction.user.id == self.dono_id
-
-    @discord.ui.button(label="Vender", style=discord.ButtonStyle.success)
-    async def vender(self, interaction: discord.Interaction, button: discord.ui.Button):
-        session = Session()
-        usuario = session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first()
-
-        jogador_para_vender = session.query(JogadorUsuario).filter_by(
-            usuario_id=usuario.id,
-            nome=self.nome,
-            posicao=self.posicao,
-            habilidade=self.habilidade
-            # Não use preco aqui, pois o preço pode mudar no futuro ou ter flutuações,
-            # e a intenção é vender o jogador pelo nome, posição e habilidade que foi obtido.
-        ).first()
-
-        if jogador_para_vender:
-            usuario.saldo += jogador_para_vender.preco # Usa o preço do jogador no DB
-            session.delete(jogador_para_vender)
-            session.commit()
-            await interaction.response.send_message(
-                f"✅ Você vendeu **{self.nome}** por ``R$ {jogador_para_vender.preco:,.0f}``!\nSaldo atual: ``R$ {usuario.saldo:,.0f}``",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message("❌ O jogador não foi encontrado no seu elenco para venda.", ephemeral=True)
-
-        session.close()
-
-    @discord.ui.button(label="Promover a titular", style=discord.ButtonStyle.primary)
-    async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
-        session = Session()
-        usuario = session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first()
-
-        # Encontrar o jogador que está sendo promovido (que já deve estar no elenco do usuário)
-        jogador_sendo_promovido = session.query(JogadorUsuario).filter_by(
-            usuario_id=usuario.id,
-            nome=self.nome,
-            posicao=self.posicao,
-            habilidade=self.habilidade
-        ).first()
-
-        if not jogador_sendo_promovido:
-            await interaction.response.send_message(f"❌ O jogador {self.nome} não foi encontrado no seu elenco para promoção.", ephemeral=True)
-            session.close()
-            return
-
-        # Obter todas as posições titulares e as ocupadas
-        posicoes_disponiveis_formacao = ['GO', 'ZAG', 'LE', 'LD', 'MC', 'ATA'] # Exemplo de posições
-        jogadores_titulares_do_usuario = session.query(JogadorUsuario).filter_by(
-            usuario_id=usuario.id
-        ).filter(JogadorUsuario.titular != None).all()
-        
-        ocupadas = [j.titular for j in jogadores_titulares_do_usuario]
-        vagas = [p for p in posicoes_disponiveis_formacao if p not in ocupadas]
-
-        if jogador_sendo_promovido.titular: # Se o jogador já é titular
-            await interaction.response.send_message(f"❌ {self.nome} já é titular na posição {jogador_sendo_promovido.titular}!", ephemeral=True)
-            session.close()
-            return
-
-        if vagas: # Se há vagas de titular
-            select = PosicaoSelect(
-                nome=self.nome,
-                posicao_original=self.posicao,
-                habilidade=self.habilidade,
-                preco=self.preco,
-                vagas=vagas,
-                usuario=usuario
-            )
-            view = discord.ui.View()
-            view.add_item(select)
-            await interaction.response.send_message("Selecione a posição para escalar o jogador:", view=view, ephemeral=True)
-
-        else: # Se não há vagas de titular (11 titulares já estão escalados)
-            # Prepara a lista de jogadores titulares para a substituição
-            opcoes_substituicao = []
-            for j in jogadores_titulares_do_usuario:
-                opcoes_substituicao.append(discord.SelectOption(
-                    label=f"{j.titular} - {j.nome} (Habilidade: {j.habilidade})",
-                    value=str(j.id) # Usar o ID do jogador para identificar unicamente
-                ))
-
-            if not opcoes_substituicao: # Salvaguarda, não deve acontecer se a condição "vagas" for falsa
-                await interaction.response.send_message("❌ Não há jogadores titulares para substituir.", ephemeral=True)
-                session.close()
+            # Carrega os jogadores relacionados ao usuário. SQLAlchemy faz isso eficientemente se 'jogadores' for uma relação.
+            # Se 'jogadores' não for uma relação carregada, é melhor fazer uma consulta explícita:
+            jogadores_possuidos = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
+            
+            if not jogadores_possuidos: # Verifica se a lista está vazia
+                await ctx.send("Parece que você ainda não tem jogadores. Use `m!obter` para conseguir um!")
                 return
 
-            select = SubstituirTitularSelect(
-                jogador_sendo_promovido_id=jogador_sendo_promovido.id,
-                opcoes_substituicao=opcoes_substituicao,
-                usuario_id=usuario.id
+            total_valor_numerico = sum(jogador.valor for jogador in jogadores_possuidos)
+            total_jogadores = len(jogadores_possuidos)
+
+            total_valor_formatado = ""
+            if total_valor_numerico >= 1_000_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.0f}M"
+            elif total_valor_numerico >= 1_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000:.0f}K"
+            else:
+                total_valor_formatado = str(total_valor_numerico)
+            
+            embed = discord.Embed(
+                title=f"⚽ {usuario.nome_time}",
+                description=
+                f"*Valor:* {total_valor_formatado}\n"
+                f"*Nº Jogadores:* {total_jogadores}",
+                color=discord.Color.blue()
+            )
+            for i, j in enumerate(jogadores_possuidos): # Itera sobre a lista carregada
+                status = f"(Titular: {j.titular})" if j.titular else "(Reserva)"
+                embed.add_field(name=f"#{i+1} - {j.nome}", value=f"Posição: {j.posicao} | Habilidade: {j.habilidade} {status}", inline=False)
+            
+            await ctx.send(embed=embed)
+
+
+
+### Classes de Interação (Botões e Selects)
+
+
+import aiohttp # Adicionado para download assíncrono
+
+class ObterOpcoes(discord.ui.View):
+    def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, ctx):
+        super().__init__()
+        self.nome = nome
+        self.valor = valor
+        self.habilidade = habilidade
+        self.posicao = posicao
+        self.usuario_discord_id = usuario_discord_id # Passamos apenas o ID do usuário
+        self.ctx = ctx
+
+    @discord.ui.button(label="Promover", style=discord.ButtonStyle.primary)
+    async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True) # Deferir imediatamente
+
+        # Crie uma nova sessão para esta interação
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+            if not usuario:
+                await interaction.followup.send("Erro: Usuário não encontrado.", ephemeral=True)
+                return
+
+            select = PosicaoSelect(
+                nome=self.nome,
+                valor=self.valor,
+                habilidade=self.habilidade,
+                posicao=self.posicao,
+                usuario_discord_id=self.usuario_discord_id, # Passa o ID do usuário para o Select
+                ctx=self.ctx
             )
             view = discord.ui.View()
             view.add_item(select)
-            await interaction.response.send_message(
-                f"🚨 Todas as posições de titular estão preenchidas! Escolha qual jogador **titular** você deseja **substituir** por **{self.nome}**:",
-                view=view,
-                ephemeral=True
-            )
-        session.close()
+            
+            await interaction.followup.send("Escolha a posição para o jogador:", view=view, ephemeral=True)
+
+    @discord.ui.button(label="Vender", style=discord.ButtonStyle.danger)
+    async def vender(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Crie uma nova sessão para esta interação
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+            if not usuario:
+                await interaction.response.send_message("Erro: Usuário não encontrado.", ephemeral=True)
+                return
+
+            jogador_para_vender = session.query(Jogador).filter_by(
+                usuario_id=usuario.id,
+                nome=self.nome,
+                posicao=self.posicao,
+                habilidade=self.habilidade
+            ).first()
+
+            if jogador_para_vender:
+                usuario.saldo += jogador_para_vender.valor
+                session.delete(jogador_para_vender)
+                session.commit()
+                await interaction.response.send_message(
+                    f"✅ Você vendeu **{self.nome}** por ``R$ {jogador_para_vender.valor:,.0f}``!\nSaldo atual: ``R$ {usuario.saldo:,.0f}``",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "❌ O jogador não foi encontrado no seu elenco para venda.",
+                    ephemeral=True
+                )
 
 class PosicaoSelect(discord.ui.Select):
-    def __init__(self, nome, posicao_original, habilidade, preco, vagas, usuario):
-        options = [discord.SelectOption(label=v, value=v) for v in vagas]
-        super().__init__(placeholder="Escolha uma posição...", min_values=1, max_values=1, options=options)
+    def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, ctx):
         self.nome = nome
-        self.posicao_original = posicao_original
+        self.valor = valor
         self.habilidade = habilidade
-        self.preco = preco
-        self.usuario = usuario
+        self.posicao = posicao
+        self.usuario_discord_id = usuario_discord_id # Recebe o ID do usuário
+        self.ctx = ctx
 
-    async def callback(self, interaction: discord.Interaction):
-        session = Session()
-
-        jogador_no_elenco = session.query(JogadorUsuario).filter_by(
-            usuario_id=self.usuario.id,
-            nome=self.nome,
-            posicao=self.posicao_original, # Usar posicao_original para encontrar o jogador que está sendo promovido
-            habilidade=self.habilidade
-        ).first()
-
-        if jogador_no_elenco:
-            jogador_no_elenco.titular = self.values[0] # Define a nova posição titular
-            session.commit()
-
-            embed = discord.Embed(title="JOGADOR PROMOVIDO!", description=f"{self.nome} é o novo {self.values[0]} do seu time!")
-            embed.set_image(url="https://via.placeholder.com/500x300.png")
-            await interaction.response.send_message(embed=embed, ephemeral=False)
-        else:
-            await interaction.response.send_message(f"❌ Erro: O jogador {self.nome} não foi encontrado no seu elenco para ser promovido.", ephemeral=True)
-
-        session.close()
-
-# --- Nova View para Substituição de Jogadores no Elenco (Comando 'obter') ---
-class SubstituirJogadorElencoView(discord.ui.View):
-    def __init__(self, usuario_id, novo_jogador_data, jogadores_existentes):
-        super().__init__(timeout=120) # Aumentei o timeout para 2 minutos
-        self.usuario_id = usuario_id
-        self.novo_jogador_data = novo_jogador_data
-        self.jogadores_existentes_data = {str(j.id): j for j in jogadores_existentes} # Mapeia ID para objeto JogadorUsuario
-
-        options = []
-        for j in jogadores_existentes:
-            options.append(discord.SelectOption(
-                label=f"{j.nome} (Habilidade: {j.habilidade}, Posição: {j.posicao}{' - Titular' if j.titular else ''})",
-                value=str(j.id) # Usar o ID do jogador como valor
-            ))
-
-        self.add_item(discord.ui.Select(
-            placeholder="Selecione um jogador para substituir...",
-            options=options,
+        options = [
+            discord.SelectOption(label="GL", description="Goleiro", value="GL"),
+            discord.SelectOption(label="LD", description="Lateral Direito", value="LD"),
+            discord.SelectOption(label="ZAG1", description="Zagueiro Central 1", value="ZAG1"),
+            discord.SelectOption(label="ZAG2", description="Zagueiro Central 2", value="ZAG2"),
+            discord.SelectOption(label="LE", description="Lateral Esquerdo", value="LE"),
+            discord.SelectOption(label="VOL", description="Volante", value="VOL"),
+            discord.SelectOption(label="MC", description="Meio-campo Central", value="MC"),
+            discord.SelectOption(label="MO", description="Meia Ofensivo", value="MO"),
+            discord.SelectOption(label="PD", description="Ponta Direita", value="PD"),
+            discord.SelectOption(label="CA", description="Centroavante", value="CA"),
+            discord.SelectOption(label="PE", description="Ponta Esquerda", value="PE"),
+        ]
+        
+        super().__init__(
+            placeholder="Escolha a posição...",
             min_values=1,
             max_values=1,
-            custom_id="select_substituir_elenco"
-        ))
-
-    async def interaction_check(self, interaction: discord.Interaction):
-        return interaction.user.id == self.usuario_id
-
-    @discord.ui.button(label="Cancelar", style=discord.ButtonStyle.grey, custom_id="cancelar_substituicao_elenco")
-    async def cancelar_substituicao(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message("❌ Substituição cancelada. O novo jogador não foi adicionado.", ephemeral=True)
-        self.stop() # Encerra a view
-
-    @discord.ui.select(custom_id="select_substituir_elenco")
-    async def select_jogador_substituir_elenco(self, interaction: discord.Interaction, select: discord.ui.Select):
-        session = Session()
-        try:
-            jogador_id_para_substituir = int(select.values[0])
-            jogador_a_remover = session.query(JogadorUsuario).filter_by(
-                id=jogador_id_para_substituir,
-                usuario_id=session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first().id
-            ).first()
-
-            if jogador_a_remover:
-                # Remove o jogador antigo
-                session.delete(jogador_a_remover)
-
-                # Adiciona o novo jogador
-                novo_jogador = JogadorUsuario(
-                    nome=self.novo_jogador_data['nome'],
-                    posicao=self.novo_jogador_data['posicao'],
-                    habilidade=self.novo_jogador_data['habilidade'],
-                    preco=self.novo_jogador_data['preco'],
-                    titular=None, # O novo jogador entra como reserva
-                    usuario_id=session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first().id
-                )
-                session.add(novo_jogador)
-                session.commit()
-
-                await interaction.response.send_message(
-                    f"✅ **{self.novo_jogador_data['nome']}** substituiu **{jogador_a_remover.nome}** no seu elenco!",
-                    ephemeral=False
-                )
-                self.stop() # Encerra a view
-            else:
-                await interaction.response.send_message("❌ Erro: Jogador a ser substituído não encontrado.", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"Ocorreu um erro ao processar a substituição: {e}", ephemeral=True)
-            print(f"Erro na substituição de elenco: {e}")
-        finally:
-            session.close()
-
-# --- Nova View para Substituição de Jogadores Titulares (Botão 'Promover') ---
-class SubstituirTitularSelect(discord.ui.Select):
-    def __init__(self, jogador_sendo_promovido_id, opcoes_substituicao, usuario_id):
-        super().__init__(placeholder="Selecione qual titular substituir...", min_values=1, max_values=1, options=opcoes_substituicao)
-        self.jogador_sendo_promovido_id = jogador_sendo_promovido_id
-        self.usuario_id = usuario_id
+            options=options
+        )
 
     async def callback(self, interaction: discord.Interaction):
-        session = Session()
-        try:
-            jogador_titular_id_para_remover = int(self.values[0])
+        await interaction.response.defer(ephemeral=True) # Deferir imediatamente
+        escolha = self.values[0]
 
-            # Encontra o jogador titular a ser removido da posição
-            jogador_titular_a_despromover = session.query(JogadorUsuario).filter_by(
-                id=jogador_titular_id_para_remover,
-                usuario_id=session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first().id
+        # Crie uma nova sessão para este callback
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+            if not usuario:
+                await interaction.followup.send("Erro: Usuário não encontrado.", ephemeral=True)
+                return
+
+            jogador_no_elenco = session.query(Jogador).filter_by(
+                usuario_id=usuario.id,
+                nome=self.nome,
+                posicao=self.posicao,
+                habilidade=self.habilidade
             ).first()
 
-            # Encontra o jogador que será promovido
-            jogador_a_promover = session.query(JogadorUsuario).filter_by(
-                id=self.jogador_sendo_promovido_id,
-                usuario_id=session.query(Usuario).filter_by(discord_id=str(interaction.user.id)).first().id
-            ).first()
+            if not jogador_no_elenco:
+                await interaction.followup.send("Jogador não encontrado no elenco. Por favor, tente novamente.", ephemeral=True)
+                return
 
-            if jogador_titular_a_despromover and jogador_a_promover:
-                posicao_ocupada = jogador_titular_a_despromover.titular
-                jogador_titular_a_despromover.titular = None # Despromove o jogador
-                jogador_a_promover.titular = posicao_ocupada # Promove o novo jogador para a posição vaga
+            posicoes_map_escolha_para_id = {
+                "GL": 10001, "LD": 10002, "ZAG1": 10003, "ZAG2": 10004,
+                "LE": 10005, "VOL": 10006, "MC": 10007, "MO": 10008,
+                "PD": 10009, "CA": 10010, "PE": 10011,
+            }
 
+            jogador_no_elenco.posicao_campo = posicoes_map_escolha_para_id.get(escolha)
+            jogador_no_elenco.titular = "Titular"
+
+            if jogador_no_elenco.posicao_campo is None:
+                await interaction.followup.send("Erro: Escolha de posição inválida. Por favor, selecione uma posição válida.", ephemeral=True)
+                return
+
+            try:
+                session.add(jogador_no_elenco)
                 session.commit()
+            except Exception as e:
+                session.rollback()
+                await interaction.followup.send(f"Erro ao salvar a posição do jogador no banco de dados: {e}", ephemeral=True)
+                return
 
-                embed = discord.Embed(
-                    title="SUBSTITUIÇÃO DE TITULAR!",
-                    description=(
-                        f"**{jogador_a_promover.nome}** é o novo {posicao_ocupada} do seu time!\n"
-                        f"**{jogador_titular_a_despromover.nome}** agora é reserva."
-                    ),
-                    color=discord.Color.blue()
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=False)
-            else:
-                await interaction.response.send_message("❌ Erro: Não foi possível encontrar os jogadores para a troca de titular.", ephemeral=True)
+            try:
+                campo = Image.open("./data/campo.jpeg").convert("RGBA")
+            except FileNotFoundError:
+                await interaction.followup.send("Erro: Imagem do campo base não encontrada.", ephemeral=True)
+                return
 
-        except Exception as e:
-            await interaction.response.send_message(f"Ocorreu um erro ao processar a promoção: {e}", ephemeral=True)
-            print(f"Erro na promoção de titular: {e}")
-        finally:
-            session.close()
+            jogadores_no_campo = session.query(Jogador).filter(
+                Jogador.usuario_id == usuario.id,
+                Jogador.posicao_campo.isnot(None)
+            ).all()
+
+            if not jogadores_no_campo:
+                await interaction.followup.send("Nenhum jogador está posicionado no seu time ainda para exibir no campo.", ephemeral=True)
+                return
+
+            download_tasks = []
+            jogadores_com_coordenadas = []
+
+            for jogador_atual in jogadores_no_campo:
+                posicao_id_num = jogador_atual.posicao_campo
+                coordenadas = posicoes_campo_coordenadas.get(posicao_id_num)
+
+                if not coordenadas:
+                    print(f"Aviso: Coordenadas não encontradas para o ID de posição: {posicao_id_num} do jogador {jogador_atual.nome}. Pulando este jogador.")
+                    continue
+
+                dados_jogador = jogadores_futebol.get(jogador_atual.nome)
+                url_carta = dados_jogador.get("imagem") if dados_jogador else None
+
+                if not url_carta:
+                    print(f"Aviso: URL da carta não encontrada para o jogador {jogador_atual.nome}. Pulando este jogador.")
+                    continue
+                
+                download_tasks.append(get_player_card_image(url_carta))
+                jogadores_com_coordenadas.append((jogador_atual, coordenadas))
+
+            if download_tasks:
+                cartas_baixadas = await asyncio.gather(*download_tasks)
+
+                for i, (jogador_atual, coordenadas) in enumerate(jogadores_com_coordenadas):
+                    carta = cartas_baixadas[i]
+                    if carta:
+                        carta_redimensionada = carta.resize(TAMANHO_CARTA, Image.LANCZOS)
+                        campo.paste(carta_redimensionada, coordenadas, carta_redimensionada)
+
+            nome_arquivo_temp = f"time_do_{usuario.id}.png"
+            caminho_temp = os.path.join("./data", nome_arquivo_temp)
+
+            try:
+                campo.save(caminho_temp)
+            except Exception as e:
+                await interaction.followup.send(f"Erro ao salvar a imagem final do campo: {e}", ephemeral=True)
+                return
+
+            file = discord.File(caminho_temp, filename=nome_arquivo_temp)
+            embed = discord.Embed(
+                title=f"⚽ Posição de {jogador_no_elenco.nome} atualizada!",
+                description="Seu time em campo com todos os jogadores posicionados.",
+                color=discord.Color.green()
+            )
+            embed.set_image(url=f"attachment://{nome_arquivo_temp}")
+            embed.set_footer(text=f"Posicionado por: {interaction.user.display_name}")
+
+            try:
+                await interaction.followup.send(file=file, embed=embed)
+            except Exception as e:
+                print(f"Erro ao enviar mensagem de interação para {interaction.user.display_name}: {e}")
+                await interaction.channel.send(f"Desculpe, {interaction.user.display_name}, não consegui enviar a imagem do seu time agora. Erro: {e}")
+
+            try:
+                os.remove(caminho_temp)
+            except OSError as e:
+                print(f"Erro ao remover arquivo temporário {caminho_temp}: {e}")
 
 
 async def setup(bot):

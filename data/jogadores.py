@@ -1,5 +1,5 @@
 jogadores_futebol = {
-    " <:lendasmxp:1376541245635301477> JULIANO": {
+    "JULIANO": {
     "posicao": "atacante",  # Meio-campista ofensivo, por exemplo
     "habilidade": 999,
     "preco": 600000000,
@@ -13,9 +13,9 @@ jogadores_futebol = {
     },
     "overall": 99,
     "colecao": "Lendas",
-    "imagem": "https://i.imgur.com/NQ4Q0Q1.png",
+    "imagem": "https://i.postimg.cc/8CJxDMCL/Juliano.png",
     },
-    "<:comummxp:1376541822867865600> J. CRAZY": {
+    "J. CRAZY": {
         "posicao": "meio ofensivo",
         "habilidade": 456,
         "preco": 160000000,
@@ -25,9 +25,9 @@ jogadores_futebol = {
         },
         "overall": 74,
         "colecao": "Comum",
-        "imagem": "https://i.imgur.com/Vz8PCaS.png"
+        "imagem": "https://i.postimg.cc/Pq8PhmL0/crazy.png"
     },
-    "<:comummxp:1376541822867865600> FERNANDO MENDES": {
+    "FERNANDO MENDES": {
         "posicao": "meio ofensivo",
         "habilidade": 480,
         "preco": 190000000,
@@ -37,6 +37,6 @@ jogadores_futebol = {
         },
         "overall": 74,
         "colecao": "Base",
-        "imagem": "https://i.imgur.com/K3PjKUq.png"
+        "imagem": "https://i.postimg.cc/CLH5xhxL/Fernando.png"
     },
 }
