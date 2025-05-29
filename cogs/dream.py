@@ -250,23 +250,17 @@ class Dream(commands.Cog):
                 Jogador.posicao_campo.isnot(None)
             ).all()
 
-   
-            jogadores_titulares = session.query(Jogador).filter(
-                Jogador.usuario_id == usuario.id,
-                Jogador.titular.isnot(None)
-            ).all()
-            total_valor_numerico = sum(jogador.valor for jogador in jogadores_titulares)
+            jogadores_possuidos = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
+            total_valor_numerico = sum(jogador.valor for jogador in jogadores_possuidos)
+            total_jogadores = len(jogadores_possuidos) # Mais eficiente que contar com func.count() se já carregou todos
 
-        total_valor_formatado = ""
-
-        if total_valor_numerico >= 1_000_000_000:
-            total_valor_formatado = f"{total_valor_numerico / 1_000_000_000:.1f}B"
-        elif total_valor_numerico >= 1_000_000:
-            total_valor_formatado = f"{total_valor_numerico / 1_000_000:.1f}M"
-        elif total_valor_numerico >= 1_000:
-            total_valor_formatado = f"{total_valor_numerico / 1_000:.1f}K"
-        else:
-            total_valor_formatado = str(total_valor_numerico)
+            total_valor_formatado = ""
+            if total_valor_numerico >= 1_000_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.0f}M"
+            elif total_valor_numerico >= 1_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000:.0f}K"
+            else:
+                total_valor_formatado = str(total_valor_numerico)
 
             # Preparar tarefas de download assíncronas para as imagens
             download_tasks = []
@@ -354,22 +348,7 @@ class Dream(commands.Cog):
                 session.add(jogador)
                 session.commit()
 
-                dados_jogador = jogadores_futebol.get(jogador.nome)
-                colecao = dados_jogador.get("colecao")
-                posicao = dados_jogador.get("posicao")
-
-                if colecao == "Comum":
-                    emoji = "<:comummxp:1376541822867865600>"
-                if colecao == "Lendas":
-                    emoji = "<:lendasmxp:1376541245635301477>"
-                if colecao == "Base":
-                    emoji = "<:comummxp:1376541822867865600>"
-            
-                embed = discord.Embed(
-                    title=f"O {posicao} {emoji} {jogador.nome} não faz mais parte do time principal",
-                    description="Sua posição foi liberada, abrindo espaço para novas estratégias e possíveis mudanças táticas."
-                )
-                await ctx.send(embed=embed)
+                await ctx.send(f"O jogador {jogador.nome} acaba de ser removido dos titulares")
 
     @commands.command()
     async def promover(self, ctx, *, jogador:str):
@@ -399,24 +378,7 @@ class Dream(commands.Cog):
                 habilidade = jogador.habilidade
                 posicao = jogador.posicao
 
-                dados_jogador = jogadores_futebol.get(nome)
-                imagem = dados_jogador.get("imagem") 
-                colecao = dados_jogador.get("colecao") 
-
-                if colecao == "Comum":
-                    emoji = "<:comummxp:1376541822867865600>"
-                if colecao == "Lendas":
-                    emoji = "<:lendasmxp:1376541245635301477>"
-                if colecao == "Base":
-                    emoji = "<:comummxp:1376541822867865600>"
-
-                embed = discord.Embed(
-                    title=f"Deseja escalar o {posicao} {emoji} {nome} para titular?",
-                    description=f"**Valor de Mercado:** ``{valor:,.0f} reais``\n**Habilidade:** ``{habilidade}``\n**Coleção:** ``{colecao}``", # Adicionei .get para colecao caso não 
-                    color=discord.Color.blue()
-                )
-                embed.set_image(url=imagem)
-                await ctx.send(embed=embed, view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+                await ctx.send(view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
 
             elif len(matches) > 1:
                 nomes_encontrados = [m[0] for m in matches]
@@ -429,6 +391,8 @@ class Dream(commands.Cog):
                 jogador = None
                 resposta = f"Vish mano, nenhum jogador semelhante a '{nome_busca}' foi encontrado no seu elenco."
                 await ctx.send(resposta)
+
+
 
     @commands.command()
     @commands.cooldown(rate=1, per=7200, type=commands.BucketType.channel)
@@ -496,7 +460,6 @@ class Dream(commands.Cog):
             await ctx.reply(
                 f"<a:HD_Loading:1370931991733600256> Você já coletou seu bônus. Tente novamente em **{horas}h {minutos}m {segundos}s**."
             )
-
     
     @commands.command()
     async def elenco(self, ctx):
@@ -519,13 +482,10 @@ class Dream(commands.Cog):
             total_jogadores = len(jogadores_possuidos)
 
             total_valor_formatado = ""
-
-            if total_valor_numerico >= 1_000_000_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000_000_000:.1f}B"
-            elif total_valor_numerico >= 1_000_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.1f}M"
+            if total_valor_numerico >= 1_000_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.0f}M"
             elif total_valor_numerico >= 1_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000:.1f}K"
+                total_valor_formatado = f"{total_valor_numerico / 1_000:.0f}K"
             else:
                 total_valor_formatado = str(total_valor_numerico)
             
@@ -541,6 +501,8 @@ class Dream(commands.Cog):
                 embed.add_field(name=f"#{i+1} - {j.nome}", value=f"Posição: {j.posicao} | Habilidade: {j.habilidade} {status}", inline=False)
             
             await ctx.send(embed=embed)
+
+
 
 ### Classes de Interação (Botões e Selects)
 
@@ -637,6 +599,7 @@ class ObterOpcoes(discord.ui.View):
                     "❌ Procurei por aqui, mas não este jogador no seu elenco!",
                     ephemeral=True
                 )
+
 
 class PosicaoSelect(discord.ui.Select):
     def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, ctx):
@@ -765,20 +728,10 @@ class PosicaoSelect(discord.ui.Select):
                 await interaction.followup.send(f"Erro ao salvar a imagem final do campo: {e}", ephemeral=True)
                 return
 
-            dados_jogador = jogadores_futebol.get(jogador_no_elenco.nome)
-            colecao = dados_jogador.get("colecao") 
-
-            if colecao == "Comum":
-                emoji = "<:comummxp:1376541822867865600>"
-            if colecao == "Lendas":
-                emoji = "<:lendasmxp:1376541245635301477>"
-            if colecao == "Base":
-                emoji = "<:comummxp:1376541822867865600>"
-
             file = discord.File(caminho_temp, filename=nome_arquivo_temp)
             embed = discord.Embed(
-                title=f"Agora {emoji} {jogador_no_elenco.nome} está em campo!",
-                description="Ele já está pronto para mostrar seu talento em campo. Aos poucos, sua escalação vai tomando forma — continue ajustando seu time rumo à vitória! Você pode sempre conferir a escalação com **m!time**.",
+                title=f"⚽ Posição de {jogador_no_elenco.nome} atualizada!",
+                description="Seu time em campo com todos os jogadores posicionados.",
                 color=discord.Color.green()
             )
             embed.set_image(url=f"attachment://{nome_arquivo_temp}")
