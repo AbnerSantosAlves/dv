@@ -250,17 +250,23 @@ class Dream(commands.Cog):
                 Jogador.posicao_campo.isnot(None)
             ).all()
 
-            jogadores_possuidos = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
-            total_valor_numerico = sum(jogador.valor for jogador in jogadores_possuidos)
-            total_jogadores = len(jogadores_possuidos) # Mais eficiente que contar com func.count() se já carregou todos
+   
+            jogadores_titulares = session.query(Jogador).filter(
+                Jogador.usuario_id == usuario.id,
+                Jogador.titular.isnot(None)
+            ).all()
+            total_valor_numerico = sum(jogador.valor for jogador in jogadores_titulares)
 
-            total_valor_formatado = ""
-            if total_valor_numerico >= 1_000_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.0f}M"
-            elif total_valor_numerico >= 1_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000:.0f}K"
-            else:
-                total_valor_formatado = str(total_valor_numerico)
+        total_valor_formatado = ""
+
+        if total_valor_numerico >= 1_000_000_000:
+            total_valor_formatado = f"{total_valor_numerico / 1_000_000_000:.1f}B"
+        elif total_valor_numerico >= 1_000_000:
+            total_valor_formatado = f"{total_valor_numerico / 1_000_000:.1f}M"
+        elif total_valor_numerico >= 1_000:
+            total_valor_formatado = f"{total_valor_numerico / 1_000:.1f}K"
+        else:
+            total_valor_formatado = str(total_valor_numerico)
 
             # Preparar tarefas de download assíncronas para as imagens
             download_tasks = []
@@ -348,7 +354,22 @@ class Dream(commands.Cog):
                 session.add(jogador)
                 session.commit()
 
-                await ctx.send(f"O jogador {jogador.nome} acaba de ser removido dos titulares")
+                dados_jogador = jogadores_futebol.get(jogador.nome)
+                colecao = dados_jogador.get("colecao")
+                posicao = dados_jogador.get("posicao")
+
+                if colecao == "Comum":
+                    emoji = "<:comummxp:1376541822867865600>"
+                if colecao == "Lendas":
+                    emoji = "<:lendasmxp:1376541245635301477>"
+                if colecao == "Base":
+                    emoji = "<:comummxp:1376541822867865600>"
+            
+                embed = discord.Embed(
+                    title=f"O {posicao} {emoji} {jogador.nome} não faz mais parte do time principal",
+                    description="Sua posição foi liberada, abrindo espaço para novas estratégias e possíveis mudanças táticas."
+                )
+                await ctx.send(embed=embed)
 
     @commands.command()
     async def promover(self, ctx, *, jogador:str):
@@ -378,7 +399,24 @@ class Dream(commands.Cog):
                 habilidade = jogador.habilidade
                 posicao = jogador.posicao
 
-                await ctx.send(view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+                dados_jogador = jogadores_futebol.get(nome)
+                imagem = dados_jogador.get("imagem") 
+                colecao = dados_jogador.get("colecao") 
+
+                if colecao == "Comum":
+                    emoji = "<:comummxp:1376541822867865600>"
+                if colecao == "Lendas":
+                    emoji = "<:lendasmxp:1376541245635301477>"
+                if colecao == "Base":
+                    emoji = "<:comummxp:1376541822867865600>"
+
+                embed = discord.Embed(
+                    title=f"Deseja escalar o {posicao} {emoji} {nome} para titular?",
+                    description=f"**Valor de Mercado:** ``{valor:,.0f} reais``\n**Habilidade:** ``{habilidade}``\n**Coleção:** ``{colecao}``", # Adicionei .get para colecao caso não 
+                    color=discord.Color.blue()
+                )
+                embed.set_image(url=imagem)
+                await ctx.send(embed=embed, view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
 
             elif len(matches) > 1:
                 nomes_encontrados = [m[0] for m in matches]
@@ -392,10 +430,8 @@ class Dream(commands.Cog):
                 resposta = f"Vish mano, nenhum jogador semelhante a '{nome_busca}' foi encontrado no seu elenco."
                 await ctx.send(resposta)
 
-
-
-
     @commands.command()
+    @commands.cooldown(rate=1, per=7200, type=commands.BucketType.channel)
     async def obter(self, ctx):
         with Session() as session: # Garante que a sessão é fechada
             usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
@@ -446,8 +482,21 @@ class Dream(commands.Cog):
             )
             embed.set_image(url=imagem)
             # Passa apenas o ID do usuário para evitar problemas de sessão
-            view = ObterOpcoes(nome, valor, habilidade, posicao, usuario.discordId, ctx)
-            await ctx.send(embed=embed, view=view)
+            view = ObterOpcoes(nome, valor, habilidade, posicao, usuario.discordId, emoji, colecao, imagem, ctx.author.name, ctx)
+            msg = await ctx.send(embed=embed, view=view)
+            view.message = msg 
+    
+    @obter.error
+    async def obter_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            horas = int(error.retry_after // 3600)
+            minutos = int((error.retry_after % 3600) // 60)
+            segundos = int(error.retry_after % 60)
+
+            await ctx.reply(
+                f"<a:HD_Loading:1370931991733600256> Você já coletou seu bônus. Tente novamente em **{horas}h {minutos}m {segundos}s**."
+            )
+
     
     @commands.command()
     async def elenco(self, ctx):
@@ -470,10 +519,13 @@ class Dream(commands.Cog):
             total_jogadores = len(jogadores_possuidos)
 
             total_valor_formatado = ""
-            if total_valor_numerico >= 1_000_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.0f}M"
+
+            if total_valor_numerico >= 1_000_000_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000_000_000:.1f}B"
+            elif total_valor_numerico >= 1_000_000:
+                total_valor_formatado = f"{total_valor_numerico / 1_000_000:.1f}M"
             elif total_valor_numerico >= 1_000:
-                total_valor_formatado = f"{total_valor_numerico / 1_000:.0f}K"
+                total_valor_formatado = f"{total_valor_numerico / 1_000:.1f}K"
             else:
                 total_valor_formatado = str(total_valor_numerico)
             
@@ -490,25 +542,28 @@ class Dream(commands.Cog):
             
             await ctx.send(embed=embed)
 
-
-
 ### Classes de Interação (Botões e Selects)
 
 
 import aiohttp # Adicionado para download assíncrono
 
 class ObterOpcoes(discord.ui.View):
-    def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, ctx):
+    def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, emoji, colecao, imagem, usuarioName, ctx):
         super().__init__()
         self.nome = nome
         self.valor = valor
         self.habilidade = habilidade
         self.posicao = posicao
         self.usuario_discord_id = usuario_discord_id # Passamos apenas o ID do usuário
+        self.emoji = emoji
+        self.colecao = colecao
+        self.imagem = imagem
+        self.usuarioName = usuarioName
         self.ctx = ctx
+        self.message = None
 
 
-    @discord.ui.button(label="Promover", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Aceitar", style=discord.ButtonStyle.success)
     async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True) # Deferir imediatamente
         # Crie uma nova sessão para esta interação
@@ -533,10 +588,17 @@ class ObterOpcoes(discord.ui.View):
             )
             view = discord.ui.View()
             view.add_item(select)
-            
-            await interaction.followup.send("Escolha a posição para o jogador:", view=view, ephemeral=True)
 
-    @discord.ui.button(label="Vender", style=discord.ButtonStyle.danger)
+            embed = discord.Embed(
+                title=f"Agora o {self.posicao} {self.emoji} {self.nome} está no seu elenco!",
+                description=f"<:anc_correto:1377418030090555472> *Mais um reforço acaba de chegar ao plantel! Use m!elenco para visualizar todos os jogadores que possui.*\n\n**Valor de Mercado:** ``{self.valor:,.0f} reais``\n**Habilidade:** ``{self.habilidade}``\n**Coleção:** ``{self.colecao}``", # Adicionei .get para colecao caso não 
+                color=discord.Color.blue()
+            )
+            embed.set_image(url=self.imagem)
+            await self.message.edit(embed=embed, view=None)
+
+
+    @discord.ui.button(label="Vender (75%)", style=discord.ButtonStyle.primary)
     async def vender(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Crie uma nova sessão para esta interação
         with Session() as session:
@@ -558,16 +620,21 @@ class ObterOpcoes(discord.ui.View):
             ).first()
 
             if jogador_para_vender:
-                usuario.saldo += jogador_para_vender.valor
+                valor = jogador_para_vender.valor * 0.75
+                usuario.saldo += valor
                 session.delete(jogador_para_vender)
                 session.commit()
-                await interaction.response.send_message(
-                    f"✅ Você vendeu **{self.nome}** por ``R$ {jogador_para_vender.valor:,.0f}``!\nSaldo atual: ``R$ {usuario.saldo:,.0f}``",
-                    ephemeral=True
+                embed = discord.Embed(
+                title=f"{self.usuarioName} acabou de vender {self.emoji} {self.nome} por R$ {valor:,.0f} e esse valor já está em seu cofre.",
+                description=f"**Valor de Mercado:** ``{jogador_para_vender.valor:,.0f} reais``\n**Habilidade:** ``{self.habilidade}``\n**Coleção:** ``{self.colecao}``", # Adicionei .get para colecao caso não 
+                color=discord.Color.blue()
                 )
+                embed.set_image(url=self.imagem)
+                await self.message.edit(embed=embed, view=None)
+
             else:
-                await interaction.response.send_message(
-                    "❌ O jogador não foi encontrado no seu elenco para venda.",
+                    await interaction.response.send_message(
+                    "❌ Procurei por aqui, mas não este jogador no seu elenco!",
                     ephemeral=True
                 )
 
@@ -698,10 +765,20 @@ class PosicaoSelect(discord.ui.Select):
                 await interaction.followup.send(f"Erro ao salvar a imagem final do campo: {e}", ephemeral=True)
                 return
 
+            dados_jogador = jogadores_futebol.get(jogador_no_elenco.nome)
+            colecao = dados_jogador.get("colecao") 
+
+            if colecao == "Comum":
+                emoji = "<:comummxp:1376541822867865600>"
+            if colecao == "Lendas":
+                emoji = "<:lendasmxp:1376541245635301477>"
+            if colecao == "Base":
+                emoji = "<:comummxp:1376541822867865600>"
+
             file = discord.File(caminho_temp, filename=nome_arquivo_temp)
             embed = discord.Embed(
-                title=f"⚽ Posição de {jogador_no_elenco.nome} atualizada!",
-                description="Seu time em campo com todos os jogadores posicionados.",
+                title=f"Agora {emoji} {jogador_no_elenco.nome} está em campo!",
+                description="Ele já está pronto para mostrar seu talento em campo. Aos poucos, sua escalação vai tomando forma — continue ajustando seu time rumo à vitória! Você pode sempre conferir a escalação com **m!time**.",
                 color=discord.Color.green()
             )
             embed.set_image(url=f"attachment://{nome_arquivo_temp}")
