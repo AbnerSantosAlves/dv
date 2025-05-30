@@ -395,7 +395,7 @@ class Dream(commands.Cog):
 
 
     @commands.command()
-    @commands.cooldown(rate=1, per=3600, type=commands.BucketType.channel)
+    @commands.cooldown(rate=1, per=3600, type=commands.BucketType.user)
     async def obter(self, ctx):
         with Session() as session: # Garante que a sessão é fechada
             usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
