@@ -586,13 +586,20 @@ class ObterOpcoes(discord.ui.View):
                 usuario.saldo += valor
                 session.delete(jogador_para_vender)
                 session.commit()
-                embed = discord.Embed(
-                title=f"{self.usuarioName} acabou de vender {self.emoji} {self.nome} por R$ {valor:,.0f} e esse valor já está em seu cofre.",
+                embed1 = discord.Embed(
+                title=f"{self.emoji} {self.nome}",
                 description=f"**Valor de Mercado:** ``{jogador_para_vender.valor:,.0f} reais``\n**Habilidade:** ``{self.habilidade}``\n**Coleção:** ``{self.colecao}``", # Adicionei .get para colecao caso não 
                 color=discord.Color.blue()
                 )
-                embed.set_image(url=self.imagem)
-                await self.message.edit(embed=embed, view=None)
+                embed2 = discord.Embed(
+                title=f"VENDA BEM-SUCEDIDA!",
+                description=f"Você vendeu **{self.nome}** por ``{valor:,.0f} reais``\n\n Agora você possui ``{usuario.saldo:,.0f} reais``", 
+                color=discord.Color.blue()
+                )
+
+                embed2.set_thumbnail(url="https://i.postimg.cc/25dd0VsW-/moeda-emoji.png")
+                embed1.set_image(url=self.imagem)
+                await self.message.edit(embeds=[embed1, embed2], view=None)
 
             else:
                     await interaction.response.send_message(
