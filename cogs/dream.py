@@ -136,6 +136,70 @@ class MudarTimeButtons(discord.ui.View):
             await interaction.response.send_message("Você já respondeu ou houve um erro.", ephemeral=True)
             print(f"Erro ao abrir modal: {e}")
 
+class ComandoVender(discord.ui.View):
+    def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, emoji, colecao, imagem, usuarioName, ctx):
+        super().__init__()
+        self.nome = nome
+        self.valor = valor
+        self.habilidade = habilidade
+        self.posicao = posicao
+        self.usuario_discord_id = usuario_discord_id # Passamos apenas o ID do usuário
+        self.emoji = emoji
+        self.colecao = colecao
+        self.imagem = imagem
+        self.usuarioName = usuarioName
+        self.ctx = ctx
+        self.message = None
+
+
+    @discord.ui.button(label="Vender (75%)", style=discord.ButtonStyle.primary)
+    async def vender(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Crie uma nova sessão para esta interação
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(self.usuario_discord_id)).first()
+
+            if interaction.user.id != self.usuario_discord_id:
+                await interaction.followup.send("Não foi você que pegou essa carta!", ephemeral=True)
+                return
+            
+            if not usuario:
+                await interaction.response.send_message("Erro: Usuário não encontrado.", ephemeral=True)
+                return
+
+            jogador_para_vender = session.query(Jogador).filter_by(
+                usuario_id=usuario.id,
+                nome=self.nome,
+                posicao=self.posicao,
+                habilidade=self.habilidade
+            ).first()
+
+            if jogador_para_vender:
+                valor = jogador_para_vender.valor * 0.75
+                usuario.saldo += valor
+                session.delete(jogador_para_vender)
+                session.commit()
+                embed1 = discord.Embed(
+                title=f"{self.emoji} {self.nome}",
+                description=f"**Valor de Mercado:** ``{jogador_para_vender.valor:,.0f} reais``\n**Habilidade:** ``{self.habilidade}``\n**Coleção:** ``{self.colecao}``", # Adicionei .get para colecao caso não 
+                color=discord.Color.blue()
+                )
+                embed2 = discord.Embed(
+                title=f"VENDA BEM-SUCEDIDA!",
+                description=f"Você vendeu **{self.nome}** por ``{valor:,.0f} reais``\n\n Agora você possui ``{usuario.saldo:,.0f} reais``", 
+                color=discord.Color.blue()
+                )
+
+                embed2.set_thumbnail(url="https://i.postimg.cc/25dd0VsW-/moeda-emoji.png")
+                embed1.set_image(url=self.imagem)
+                await self.message.edit(embeds=[embed1, embed2], view=None)
+
+            else:
+                    await interaction.response.send_message(
+                    "❌ Procurei por aqui, mas não este jogador no seu elenco!",
+                    ephemeral=True
+                )
+
+
 
 class Promover(discord.ui.View):
     def __init__(self, nome, valor, habilidade, posicao, usuario_discord_id, ctx):
@@ -147,6 +211,7 @@ class Promover(discord.ui.View):
         self.posicao = posicao
         self.usuario_discord_id = usuario_discord_id
         self.ctx = ctx
+    
 
     @discord.ui.button(label="Promover", style=discord.ButtonStyle.primary)
     async def promover(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -378,7 +443,78 @@ class Dream(commands.Cog):
                 habilidade = jogador.habilidade
                 posicao = jogador.posicao
 
-                await ctx.send(view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+                dados_jogador = jogadores_futebol.get(jogador.nome)
+                url_carta = dados_jogador.get("imagem") if dados_jogador else None
+
+                embed = discord.Embed(
+                    title=f"Deseja promover o {posicao} {nome} para a posição de titular?",
+                    description=f"**Valor de Mercado:** ``{valor:,.0f}``\n**Habilidade:** ``{habilidade}"
+                )
+                embed.set_image(url=url_carta)
+                await ctx.send(embed=embed, view=Promover(nome, valor, habilidade, posicao, usuario.discordId, ctx))
+
+            elif len(matches) > 1:
+                nomes_encontrados = [m[0] for m in matches]
+                nomes_formatados = "\n".join(f"• {nome}" for nome in nomes_encontrados)
+                jogador = None
+                resposta = f":rolling_eyes: Vários jogadores encontrados parecidos com '{nome_busca}':\n{nomes_formatados}\nPor favor, especifique melhor o nome, ou pontuação."
+                await ctx.send(resposta)
+
+            else:
+                jogador = None
+                resposta = f"Vish mano, nenhum jogador semelhante a '{nome_busca}' foi encontrado no seu elenco."
+                await ctx.send(resposta)
+
+
+    @commands.command()
+    async def vender(self, ctx, *, jogador:str):
+        with Session() as session:
+            usuario = session.query(Usuario).filter_by(discordId=str(ctx.author.id)).first()
+
+            if not usuario:
+                usuario = Usuario(discordId=str(ctx.author.id), saldo=0.0, nome_time="Novo Time", time_sigla="NVT", escalacao="4-3-3", valor_time=0.0, estadio="Estádio António Coimbra da Mota")
+                session.add(usuario)
+                session.commit()
+            
+
+            nome_busca = jogador.strip().upper()
+            jogadores = session.query(Jogador).filter_by(usuario_id=usuario.id).all()
+            lista_nomes = [j.nome for j in jogadores]
+
+            # Busca os 3 nomes mais parecidos com o nome digitado
+            matches = process.extract(nome_busca, lista_nomes, limit=3, score_cutoff=70)
+
+            if len(matches) == 1:
+                nome_encontrado = matches[0][0]
+                jogador = session.query(Jogador).filter_by(usuario_id=usuario.id, nome=nome_encontrado).first()
+                print(f":white_check_mark: Jogador encontrado: {jogador.nome}")
+                            
+                nome = jogador.nome
+                valor = jogador.valor
+                habilidade = jogador.habilidade
+                posicao = jogador.posicao
+
+                dados_jogador = jogadores_futebol.get(jogador.nome)
+                imagem = dados_jogador.get("imagem") if dados_jogador else None
+                colecao = dados_jogador.get("colecao")
+
+                if colecao == "Comum":
+                    emoji = "<:comummxp:1376541822867865600>"
+                if colecao == "Lendas":
+                    emoji = "<:lendasmxp:1376541245635301477>"
+                if colecao == "Base":
+                    emoji = "<:comummxp:1376541822867865600>"
+                
+                embed = discord.Embed(
+                    title=f"Deseja vender o {posicao} {emoji} {nome} para a posição de titular?",
+                    description=f"**Valor de Mercado:** ``{valor:,.0f}``\n**Habilidade:** ``{habilidade}"
+                )
+                embed.set_image(url=imagem)
+                view = ComandoVender(nome, valor, habilidade, posicao, usuario.discordId, emoji, colecao, imagem, ctx.author.name, ctx)
+                message = await ctx.send(embed=embed, view=view)
+                view.message = message
+
+
 
             elif len(matches) > 1:
                 nomes_encontrados = [m[0] for m in matches]
