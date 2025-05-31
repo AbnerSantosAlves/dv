@@ -507,7 +507,7 @@ class Dream(commands.Cog):
                 
                 embed = discord.Embed(
                     title=f"Deseja vender o {posicao} {emoji} {nome} para a posição de titular?",
-                    description=f"**Valor de Mercado:** ``{valor:,.0f}``\n**Habilidade:** ``{habilidade}"
+                    description=f"**Valor de Mercado:** ``{valor:,.0f}``\n**Habilidade:** ``{habilidade}``"
                 )
                 embed.set_image(url=imagem)
                 view = ComandoVender(nome, valor, habilidade, posicao, usuario.discordId, emoji, colecao, imagem, ctx.author.name, ctx)
